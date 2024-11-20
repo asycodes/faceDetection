@@ -19,39 +19,95 @@ args = parser.parse_args()
 
 # /** Global variables */
 cascade_name = "frontalface.xml"
-
+ground_truth_bounding_boxes = [] # to store all boundary boxes for IOU computation
+pred_bounding_boxes = []
 
 def detectAndDisplay(frame):
 
 	# 1. Prepare Image by turning it into Grayscale and normalising lighting
     frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     frame_gray = cv2.equalizeHist(frame_gray)
+    cv2.imwrite( "preprocessed.jpg", frame_gray )
     # 2. Perform Viola-Jones Object Detection
-    faces = model.detectMultiScale(frame_gray, scaleFactor=1.1, minNeighbors=1, flags=0, minSize=(10,10), maxSize=(300,300))
-    # 3. Print number of Faces found
-    print(len(faces))
+    faces = model.detectMultiScale(frame_gray, scaleFactor=1.07, minNeighbors=2, flags=0, minSize=(10,10), maxSize=(300,300))
+    readGroundtruth(frame)
     # 4. Draw box around faces found
     for i in range(0, len(faces)):
         start_point = (faces[i][0], faces[i][1])
         end_point = (faces[i][0] + faces[i][2], faces[i][1] + faces[i][3])
+        pred_bounding_boxes.append((start_point,end_point,faces[i][2],faces[i][3]))
         colour = (0, 255, 0)
         thickness = 2
         frame = cv2.rectangle(frame, start_point, end_point, colour, thickness)
+    success = evaluate_iou()
+    tpr_result = tpr(success)
+    f1_result = f1(success)
+    print("SUCCESS: ",success)
+    print("TPR: ",tpr_result)
+    print("F1: ",f1_result)
+
 
 
 # ************ NEED MODIFICATION ************
-def readGroundtruth(filename='groundtruth.txt'):
+def readGroundtruth(frame,filename='groundtruth.txt'):
     # read bounding boxes as ground truth
     with open(filename) as f:
         # read each line in text file
         for line in f.readlines():
             content_list = line.split(",")
             img_name = content_list[0]
-            x = float(content_list[1])
-            y = float(content_list[2])
-            width = float(content_list[3])
-            height = float(content_list[4])
-            print(str(x)+' '+str(y)+' '+str(width)+' '+str(height))
+            if img_name == imageName.lstrip("images/").rstrip(".jpg"):
+                x = int(float(content_list[1]))
+                y = int(float(content_list[2]))
+                width = int(float(content_list[3]))
+                height = int(float(content_list[4]))
+                print(str(x)+' '+str(y)+' '+str(width)+' '+str(height))
+                ## draw
+                start_point = (x, y)
+                end_point = (x + width, y + height)
+                ground_truth_bounding_boxes.append((start_point,end_point,width,height))
+                colour = (0, 0, 255)
+                thickness = 2
+                frame = cv2.rectangle(frame, start_point, end_point, colour, thickness)
+
+
+def iou(pred,truth):
+    # coord of intersection points
+    start_x = max(pred[0][0],truth[0][0])
+    start_y = max(pred[0][1],truth[0][1])
+    end_x = min(pred[1][0],truth[1][0])
+    end_y = min(pred[1][1],truth[1][1])
+
+    area_inters = max(0,(end_x - start_x)) * max(0,(end_y-start_y))
+    area_pred = (pred[1][0]-pred[0][0]) * (pred[1][1]-pred[0][1])
+    area_truth = (truth[1][0]-truth[0][0]) * (truth[1][1]-truth[0][1])
+    area_union = area_pred+area_truth - area_inters
+
+    iou_score = area_inters/area_union
+    return iou_score
+
+
+
+def evaluate_iou():
+    # loop each pred with each ground, if over threshold we +1 success
+    success = 0
+    for pred in pred_bounding_boxes:
+        for truth in ground_truth_bounding_boxes:
+            if iou(pred,truth) > 0.5: # if more than threshold, we +1 success
+                success +=1
+                break
+    return success
+
+
+def tpr(success):
+    return success/len(ground_truth_bounding_boxes)
+
+def f1(success):
+    #2*[(precision*recall)/(precision+recall)]
+    precision = success/len(pred_bounding_boxes)
+    #false negative is truth - pred
+    recall = success/( success + len(ground_truth_bounding_boxes) - success)
+    return 2* ((precision*recall)/(precision+recall))
 
 
 
